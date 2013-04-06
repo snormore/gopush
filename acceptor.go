@@ -1,7 +1,7 @@
 package pusher
 
 import (
-	"http"
+	"net/http"
 )
 
 // Acceptor is a pre-flight mechanism for a) authenticating incoming

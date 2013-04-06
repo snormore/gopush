@@ -3,8 +3,7 @@ package pusher
 import (
 	"container/list"
 	"fmt"
-	"http"
-	"os"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -54,7 +53,7 @@ func newChannel(id string, config *Configuration) (c *channel) {
 	c = &channel{
 		subscribers: list.New(),
 		config:      config,
-		stats:       Stats{Created: time.Seconds()},
+		stats:       Stats{Created: time.Now().Unix()},
 		id:          id,
 		queue:       make([]*Message, 0),
 	}
@@ -73,7 +72,7 @@ func (c *channel) stamp() int64 {
 
 // WriteStats writes statistics about this channel straight to rw. It
 // will determine the encoding of the stats based on the request's Accept-header.
-func (c *channel) writeStats(rw http.ResponseWriter, req *http.Request) os.Error {
+func (c *channel) writeStats(rw http.ResponseWriter, req *http.Request) error {
 	var typ, subtype string
 
 	// Valid Accept-types are {text | application} / {statFormats...}.
@@ -100,12 +99,12 @@ func (c *channel) writeStats(rw http.ResponseWriter, req *http.Request) os.Error
 	// format plain mode stamps to ago
 	if subtype == "plain" {
 		if stats.LastRequested > 0 {
-			stats.LastRequested = time.Seconds() - stats.LastRequested
+			stats.LastRequested = time.Now().Unix() - stats.LastRequested
 		} else {
 			stats.LastRequested = -1
 		}
 		if stats.LastPublished > 0 {
-			stats.LastPublished = time.Seconds() - stats.LastPublished
+			stats.LastPublished = time.Now().Unix() - stats.LastPublished
 		} else {
 			stats.LastRequested = -1
 		}
@@ -141,7 +140,7 @@ func (c *channel) PublishString(s string, queue bool) int {
 }
 
 func (c *channel) publish(m *Message, queue bool) (n int) {
-	m.time = time.Seconds()
+	m.time = time.Now().Unix()
 	m.etag = 0
 
 	if c.lastMessage != nil && c.lastMessage.time == m.time {
@@ -150,7 +149,7 @@ func (c *channel) publish(m *Message, queue bool) (n int) {
 
 	c.lastMessage = m
 	c.stats.Published++
-	c.stats.LastPublished = time.Seconds()
+	c.stats.LastPublished = time.Now().Unix()
 
 	for e := c.subscribers.Front(); e != nil; e = e.Next() {
 		client := e.Value.(chan *Message)
@@ -197,7 +196,7 @@ func (c *channel) Subscribe(since int64, etag int) (*list.Element, *Message) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.stats.LastRequested = time.Seconds()
+	c.stats.LastRequested = time.Now().Unix()
 
 	switch c.config.ConcurrencyMode {
 	case ConcurrencyModeLIFO:

@@ -1,8 +1,8 @@
 package pusher
 
 import (
-	"http"
 	"log"
+	"net/http"
 	"os"
 )
 

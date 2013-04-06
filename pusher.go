@@ -2,10 +2,10 @@ package pusher
 
 import (
 	"bytes"
-	"http"
-	"sync"
+	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -44,7 +44,7 @@ func New(acceptor Acceptor, config Configuration) (p *pusher) {
 
 	if config.GCInterval > 0 && (config.MaxChannelIdleTime > 0 || config.MaxChannels > 0) {
 		go func() {
-			for _ = range time.Tick(config.GCInterval) {
+			for _ = range time.Tick(time.Duration(config.GCInterval)) {
 				p.GC()
 			}
 		}()
@@ -78,7 +78,7 @@ func (p *pusher) GC() int {
 	var i int
 	var c *channel
 
-	start := time.Nanoseconds()
+	start := time.Now().Unix()
 	limit := (start - p.config.MaxChannelIdleTime) / 1e9
 	count := len(p.channels)
 
@@ -97,7 +97,7 @@ func (p *pusher) GC() int {
 			break
 		}
 		gc = sorted[:i+1]
-		p.channels[c.id] = nil, false
+		delete(p.channels, c.id)
 		count--
 	}
 	p.lock.Unlock()
@@ -107,7 +107,7 @@ func (p *pusher) GC() int {
 		Logger.Printf("GC: Channel %q was garbage collected", c.id)
 	}
 
-	Logger.Printf("GC: Ended in %d ns with %d channels garbage collected", time.Nanoseconds()-start, len(gc))
+	Logger.Printf("GC: Ended in %d ns with %d channels garbage collected", time.Now().Unix() - start, len(gc))
 	return len(gc)
 }
 
@@ -131,7 +131,7 @@ func (p *pusher) GC() int {
 func (p *pusher) handlePublisher(rw http.ResponseWriter, req *http.Request) {
 	cid := p.acceptor(req)
 	if cid == "" {
-		Logger.Printf("Pub/404: Acceptor denied access to URL %q [%s]", req.RawURL, req.RemoteAddr)
+		Logger.Printf("Pub/404: Acceptor denied access to URL %q [%s]", req.URL.String(), req.RemoteAddr)
 		rw.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -190,7 +190,7 @@ func (p *pusher) handlePublisher(rw http.ResponseWriter, req *http.Request) {
 		p.lock.Lock()
 		c, ok = p.channels[cid]
 		if ok {
-			p.channels[cid] = nil, false
+			delete(p.channels, cid)
 			p.lock.Unlock()
 			c.Publish(goneMessage, false)
 			Logger.Printf("Pub/200: Channel %q was deleted [%s]", cid, req.RemoteAddr)
@@ -239,7 +239,7 @@ func (p *pusher) handleSubscriber(rw http.ResponseWriter, req *http.Request) {
 		Logger.Printf("Sub/405: A non GET request to channel %q [%s]", cid, req.RemoteAddr)
 		status = http.StatusMethodNotAllowed
 	} else if cid == "" {
-		Logger.Printf("Sub/404: Acceptor denied access to URL %q [%s]", req.RawURL, req.RemoteAddr)
+		Logger.Printf("Sub/404: Acceptor denied access to URL %q [%s]", req.URL.String(), req.RemoteAddr)
 		status = http.StatusNotFound
 	}
 
@@ -248,8 +248,8 @@ func (p *pusher) handleSubscriber(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if ifsince, _ := time.Parse(http.TimeFormat, req.Header.Get("If-Modified-Since")); ifsince != nil {
-		since = ifsince.Seconds()
+	if ifsince, err := time.Parse(http.TimeFormat, req.Header.Get("If-Modified-Since")); err == nil {
+		since = ifsince.Unix()
 	}
 	etag, _ := strconv.Atoi(req.Header.Get("If-None-Match"))
 
@@ -276,7 +276,7 @@ func (p *pusher) handleSubscriber(rw http.ResponseWriter, req *http.Request) {
 		if p.config.PollingTimeout > 0 {
 			select {
 			case message = <-sub.Value.(chan *Message):
-			case <-time.After(p.config.PollingTimeout):
+			case <-time.After(time.Duration(p.config.PollingTimeout)):
 				c.Unsubscribe(sub)
 			}
 		} else {
@@ -290,7 +290,7 @@ func (p *pusher) handleSubscriber(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	rw.Header().Set("Etag", strconv.Itoa(message.etag))
-	rw.Header().Set("Last-Modified", time.SecondsToUTC(message.time).Format(http.TimeFormat))
+	rw.Header().Set("Last-Modified", time.Unix(message.time, 0).UTC().Format(http.TimeFormat))
 
 	if message.ContentType != "" {
 		rw.Header().Set("Content-Type", message.ContentType)
