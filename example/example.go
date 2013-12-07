@@ -3,9 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
-	"http"
+	"github.com/snormore/gopusher"
 	"log"
-	"pusher"
+	"net/http"
 	"time"
 )
 
